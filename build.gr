@@ -1,0 +1,110 @@
+// Module for building the matching library based on the db.json file
+
+module Generator
+
+include "path"
+include "list"
+include "map"
+include "buffer"
+include "./json"
+include "./fs"
+
+let buildProgram = str => {
+  // Parse the str
+  let json = match (Json.parse(str)) {
+    Ok(c) => c,
+    Err(e) => fail toString(e),
+  }
+  // Go through the json
+  let lookupList = Map.make()
+  List.forEach(((key, value)) => {
+    let value = match (value) {
+      Json.JsonObject(c) => c,
+      _ => fail "Expected a json object",
+    }
+    let extensions = List.find(((key, val)) => key == "extensions", value)
+    match (extensions) {
+      Some((_, Json.JsonArray(exts))) => {
+        let exts = List.map(ext => match (ext) {
+          Json.JsonString(c) => c,
+          _ => fail "Expected a json string",
+        }, exts)
+        List.forEach(ext => {
+          let exts = match (Map.get(ext, lookupList)) {
+            Some(c) => c,
+            None => [],
+          }
+          Map.set(ext, [key, ...exts], lookupList)
+        }, exts)
+      },
+      _ => void,
+    }
+  }, match (json) {
+    Json.JsonObject(c) => c,
+    _ => fail "Expected a json object",
+  })
+  // Build the program
+  let program = Buffer.make(0)
+  // Append Program License
+  Buffer.addString(
+    "/*
+The dataset used for generating this module is taken from mime-db:
+
+Copyright (c) 2014 Jonathan Ong <me@jongleberry.com>
+Copyright (c) 2015-2022 Douglas Christopher Wilson <doug@somethingdoug.com>
+
+Permission is hereby granted, free of charge, to any person obtaining
+a copy of this software and associated documentation files (the
+'Software'), to deal in the Software without restriction, including
+without limitation the rights to use, copy, modify, merge, publish,
+distribute, sublicense, and/or sell copies of the Software, and to
+permit persons to whom the Software is furnished to do so, subject to
+the following conditions:
+*/\n",
+    program
+  )
+  // Add Program Header
+  Buffer.addString("module MimeType\n\n", program)
+  // Add Function
+  Buffer.addString(
+    "/**
+ * Determines the possible mime-types for a given file extension.
+ *
+ * @param fileExt: The given file extension
+ *
+ * @returns The mime-types for the given file extension
+ */
+",
+    program
+  )
+  Buffer.addString("provide let lookup = (fileExt) => {\n", program)
+  // Add Function Body
+  Buffer.addString("  match (fileExt) {\n", program)
+  List.forEach(((key, value)) => {
+    Buffer.addString("    \"", program)
+    Buffer.addString(key, program)
+    Buffer.addString("\" => [\n", program)
+    List.forEach(mime => {
+      Buffer.addString("      \"", program)
+      Buffer.addString(mime, program)
+      Buffer.addString("\",\n", program)
+    }, value)
+    Buffer.addString("    ],\n", program)
+  }, Map.toList(lookupList))
+  Buffer.addString("    _ => []\n", program)
+  Buffer.addString("  }\n", program)
+  // Add Function End
+  Buffer.addString("}\n", program)
+
+  // Return program
+  Buffer.toString(program)
+}
+
+// Read the file
+let mimeDB = match (Fs.Utf8.readFile(Path.fromString("./db.json"))) {
+  Ok(c) => c,
+  Err(e) => fail toString(e),
+}
+let program = buildProgram(mimeDB)
+
+Fs.Utf8.writeFile(Path.fromString("./mimeType.gr"), program)
